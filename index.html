@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Separation Press — photos → AI-readable PDF</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   SEPARATION PRESS — design tokens
+   Palette grounded in pre-press: scanner-bed bone, graphite ink,
+   process cyan (text layer) + process magenta (contone layer),
+   stamp green / correction red for verification.
+   ============================================================ */
+:root{
+  --bed:#EDEAE2;          /* scanner bed */
+  --bed-deep:#E3E0D6;
+  --panel:#F7F5EF;        /* paper card */
+  --ink:#1B1D1F;
+  --ink-soft:#5A5C58;
+  --line:#C9C5B8;
+  --cyan:#0093B8;         /* TEXT layer */
+  --cyan-soft:rgba(0,147,184,.16);
+  --magenta:#CD2F7B;      /* CONTONE layer */
+  --magenta-soft:rgba(205,47,123,.15);
+  --pass:#2E7D4F;
+  --fail:#C4442A;
+  --warn:#A66A00;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Archivo",system-ui,-apple-system,sans-serif;
+  --r:3px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bed);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:14px;
+  line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+button:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{
+  outline:2px solid var(--cyan);outline-offset:2px;
+}
+::selection{background:var(--cyan-soft)}
+
+/* ---------- header ---------- */
+header{
+  display:flex;align-items:center;gap:14px;
+  padding:10px 18px;
+  border-bottom:1px solid var(--line);
+  background:var(--panel);
+}
+.mark{
+  display:flex;align-items:baseline;gap:10px;
+}
+.mark h1{
+  font-size:15px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+}
+.mark .sep{display:inline-flex;gap:3px}
+.mark .sep i{width:9px;height:9px;display:inline-block}
+.mark .sep i:nth-child(1){background:var(--cyan)}
+.mark .sep i:nth-child(2){background:var(--magenta)}
+.mark .sep i:nth-child(3){background:var(--ink)}
+.mark small{color:var(--ink-soft);font-size:12px}
+.deps{
+  margin-left:auto;display:flex;gap:14px;
+  font-family:var(--mono);font-size:11px;color:var(--ink-soft);
+}
+.deps b{font-weight:500;color:var(--ink)}
+.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--line);vertical-align:1px;margin-right:5px}
+.dot.ready{background:var(--pass)}
+.dot.busy{background:var(--warn)}
+
+/* ---------- layout ---------- */
+.app{
+  display:grid;
+  grid-template-columns:150px 1fr 372px;
+  height:calc(100% - 46px);
+}
+@media(max-width:1020px){
+  .app{grid-template-columns:1fr;height:auto;grid-template-rows:auto auto auto}
+  .rail{border-left:none;border-top:1px solid var(--line)}
+  .tray{flex-direction:row!important;border-right:none!important;border-bottom:1px solid var(--line)}
+  .viewer-wrap{min-height:60vh}
+}
+
+/* ---------- tray ---------- */
+.tray{
+  display:flex;flex-direction:column;gap:8px;
+  padding:12px;border-right:1px solid var(--line);
+  overflow:auto;background:var(--bed-deep);
+}
+.thumb{
+  position:relative;border:1px solid var(--line);background:#fff;
+  border-radius:var(--r);padding:0;overflow:hidden;flex:0 0 auto;
+}
+.thumb img{display:block;width:100%;height:auto}
+.thumb .tag{
+  position:absolute;left:4px;bottom:4px;
+  font-family:var(--mono);font-size:10px;
+  background:var(--ink);color:#fff;padding:1px 5px;border-radius:2px;
+}
+.thumb.current{outline:2px solid var(--ink);outline-offset:1px}
+.thumb .stamp{position:absolute;top:4px;right:4px;font-size:10px;font-family:var(--mono);
+  padding:0 4px;border-radius:2px;color:#fff}
+.stamp.pass{background:var(--pass)}
+.stamp.fail{background:var(--fail)}
+.addbtn{
+  border:1px dashed var(--ink-soft);border-radius:var(--r);
+  padding:14px 6px;color:var(--ink-soft);font-size:12px;text-align:center;
+}
+.addbtn:hover{color:var(--ink);border-color:var(--ink)}
+
+/* ---------- viewer ---------- */
+.viewer-wrap{display:flex;flex-direction:column;min-width:0}
+.viewbar{
+  display:flex;align-items:center;gap:8px;padding:10px 14px;
+  border-bottom:1px solid var(--line);background:var(--panel);
+}
+.chip{
+  font-family:var(--mono);font-size:11px;letter-spacing:.03em;
+  padding:4px 10px;border:1px solid var(--line);border-radius:20px;color:var(--ink-soft);
+}
+.chip[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.legend{margin-left:auto;display:flex;gap:12px;font-family:var(--mono);font-size:10.5px;color:var(--ink-soft)}
+.legend i{display:inline-block;width:10px;height:10px;margin-right:4px;vertical-align:-1px}
+.legend .lt i{background:var(--cyan-soft);border:1px solid var(--cyan)}
+.legend .lc i{background:var(--magenta-soft);border:1px solid var(--magenta)}
+.stage{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  padding:18px;overflow:auto;min-height:0;
+}
+.stage canvas{
+  max-width:100%;max-height:100%;
+  background:#fff;border:1px solid var(--line);
+  box-shadow:0 6px 24px rgba(27,29,31,.08);
+}
+.empty{
+  border:1.5px dashed var(--ink-soft);border-radius:6px;
+  padding:56px 44px;text-align:center;color:var(--ink-soft);max-width:460px;
+}
+.empty h2{font-size:17px;color:var(--ink);margin-bottom:8px;font-weight:700}
+.empty p{font-size:13px;margin-bottom:16px}
+.empty .go{
+  display:inline-block;background:var(--ink);color:#fff;
+  padding:9px 18px;border-radius:var(--r);font-weight:600;
+}
+.empty.drag{border-color:var(--cyan);background:var(--cyan-soft)}
+
+/* ---------- rail ---------- */
+.rail{
+  border-left:1px solid var(--line);overflow-y:auto;background:var(--panel);
+  display:flex;flex-direction:column;
+}
+.mod{border-bottom:1px solid var(--line);padding:14px 16px}
+.mod h3{
+  font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink-soft);margin-bottom:10px;display:flex;align-items:center;gap:8px;
+}
+.mod h3 .step{
+  font-family:var(--mono);font-weight:500;font-size:10px;
+  border:1px solid var(--line);padding:0 4px;border-radius:2px;color:var(--ink-soft);
+}
+.verdict{
+  border:1px solid var(--line);border-left:4px solid var(--ink);
+  background:#fff;border-radius:var(--r);padding:10px 12px;font-size:12.5px;
+}
+.verdict b{display:block;font-size:13px;margin-bottom:3px}
+.verdict.td{border-left-color:var(--cyan)}
+.verdict.pd{border-left-color:var(--magenta)}
+.verdict .hint{color:var(--ink-soft);margin-top:5px}
+.mix{display:flex;height:8px;border-radius:2px;overflow:hidden;margin:9px 0 4px;border:1px solid var(--line)}
+.mix span{display:block;height:100%}
+.mix .t{background:var(--cyan)}
+.mix .c{background:var(--magenta)}
+.mix .b{background:#fff}
+.mixlbl{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--ink-soft)}
+
+/* budgets */
+.gauges{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.gauge{
+  background:#fff;border:1px solid var(--line);border-radius:var(--r);
+  padding:9px 11px;
+}
+.gauge .lbl{font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:var(--ink-soft);text-transform:uppercase}
+.gauge .num{font-family:var(--mono);font-size:22px;font-weight:600;line-height:1.15;margin-top:2px}
+.gauge .sub{font-family:var(--mono);font-size:10.5px;color:var(--ink-soft)}
+.tokrows{margin-top:10px;font-family:var(--mono);font-size:11.5px}
+.tokrows div{display:flex;justify-content:space-between;padding:3px 0;border-top:1px dashed var(--line)}
+.tokrows span:last-child{font-weight:600}
+.tokrows .astext{color:var(--pass)}
+
+/* sliders */
+.ctl{margin-bottom:12px}
+.ctl label{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;color:var(--ink-soft)}
+.ctl label output{font-family:var(--mono);color:var(--ink);font-weight:600;font-size:12px}
+input[type=range]{
+  width:100%;appearance:none;height:3px;background:var(--line);border-radius:2px;
+}
+input[type=range]::-webkit-slider-thumb{
+  appearance:none;width:15px;height:15px;border-radius:50%;
+  background:var(--ink);border:3px solid var(--panel);box-shadow:0 0 0 1px var(--ink);
+  cursor:pointer;
+}
+input[type=range]::-moz-range-thumb{
+  width:11px;height:11px;border-radius:50%;background:var(--ink);border:2px solid var(--panel);
+  box-shadow:0 0 0 1px var(--ink);cursor:pointer;
+}
+.ctl .note{font-size:11px;color:var(--ink-soft);margin-top:3px}
+
+/* verify */
+.btn{
+  display:block;width:100%;text-align:center;
+  background:var(--ink);color:#fff;border-radius:var(--r);
+  padding:9px 12px;font-weight:600;font-size:13px;
+}
+.btn:hover{background:#000}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--ink)}
+.btn.ghost:hover{background:var(--bed-deep)}
+.btn + .btn{margin-top:8px}
+.proof{
+  margin-top:12px;background:#fff;border:1px solid var(--line);border-radius:var(--r);
+  font-family:var(--mono);font-size:11.5px;
+}
+.proof .strip{display:flex;height:7px;border-bottom:1px solid var(--line)}
+.proof .strip i{flex:1}
+.proof .strip i:nth-child(1){background:var(--cyan)}
+.proof .strip i:nth-child(2){background:var(--magenta)}
+.proof .strip i:nth-child(3){background:#F2C230}
+.proof .strip i:nth-child(4){background:var(--ink)}
+.proof .strip i:nth-child(5){background:#fff}
+.proof .rows{padding:8px 10px}
+.proof .rows div{display:flex;justify-content:space-between;padding:2.5px 0}
+.proof .rows span:last-child{font-weight:600}
+.ok{color:var(--pass)} .bad{color:var(--fail)} .mid{color:var(--warn)}
+.console{
+  margin-top:10px;background:var(--ink);color:#CFCFC6;border-radius:var(--r);
+  font-family:var(--mono);font-size:10.5px;line-height:1.55;
+  padding:8px 10px;max-height:130px;overflow-y:auto;white-space:pre-wrap;
+}
+.console:empty{display:none}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:12.5px;margin:10px 0 12px}
+.check input{margin-top:3px;accent-color:var(--ink)}
+.check small{display:block;color:var(--ink-soft);font-size:11px}
+.pgbar{height:3px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:10px;display:none}
+.pgbar.on{display:block}
+.pgbar i{display:block;height:100%;width:0;background:var(--cyan);transition:width .2s}
+@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+footer{
+  padding:10px 16px;font-size:11px;color:var(--ink-soft);
+  font-family:var(--mono);line-height:1.6;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="mark">
+    <span class="sep" aria-hidden="true"><i></i><i></i><i></i></span>
+    <h1>Separation Press</h1>
+    <small>photos → verified, token-budgeted, AI-readable PDF · runs entirely in your browser</small>
+  </div>
+  <div class="deps">
+    <span><i class="dot" id="dotOcr"></i>OCR engine <b id="ocrState">idle</b></span>
+    <span><i class="dot" id="dotPdf"></i>PDF writer <b id="pdfState">idle</b></span>
+  </div>
+</header>
+
+<div class="app">
+
+  <!-- page tray -->
+  <nav class="tray" id="tray" aria-label="Pages">
+    <button class="addbtn" id="addBtn">+ Add photos</button>
+    <input type="file" id="fileInput" accept="image/*" multiple hidden>
+  </nav>
+
+  <!-- viewer -->
+  <main class="viewer-wrap">
+    <div class="viewbar">
+      <button class="chip" data-view="orig" aria-pressed="true">Original</button>
+      <button class="chip" data-view="layers" aria-pressed="false">Separation</button>
+      <button class="chip" data-view="out" aria-pressed="false">Output</button>
+      <div class="legend">
+        <span class="lt"><i></i>text layer — kept sharp</span>
+        <span class="lc"><i></i>contone layer — smoothed</span>
+      </div>
+    </div>
+    <div class="stage" id="stage">
+      <div class="empty" id="empty">
+        <h2>Drop page photos here</h2>
+        <p>Each page is separated into a text layer and a contone layer (the MRC idea),
+           compressed on two independent budgets — visual tokens and kilobytes — then
+           verified by re-reading its own text with OCR before export.</p>
+        <button class="go" id="emptyAdd">Choose images</button>
+      </div>
+      <canvas id="view" hidden></canvas>
+    </div>
+  </main>
+
+  <!-- control rail -->
+  <aside class="rail">
+
+    <section class="mod" id="modAnalyze">
+      <h3><span class="step">01</span> Analyze</h3>
+      <div class="verdict" id="verdict"><b>No page selected</b>Add a photo to run layer separation.</div>
+      <div class="mix" id="mixbar" hidden><span class="t"></span><span class="c"></span><span class="b"></span></div>
+      <div class="mixlbl" id="mixlbl" hidden><span>text</span><span>contone</span><span>blank</span></div>
+    </section>
+
+    <section class="mod">
+      <h3><span class="step">02</span> Budgets</h3>
+      <div class="gauges">
+        <div class="gauge">
+          <div class="lbl">Visual tokens</div>
+          <div class="num" id="gTok">—</div>
+          <div class="sub" id="gTokSub">Qwen2.5-VL</div>
+        </div>
+        <div class="gauge">
+          <div class="lbl">File size</div>
+          <div class="num" id="gKb">—</div>
+          <div class="sub" id="gDims">per page</div>
+        </div>
+      </div>
+      <div class="tokrows" id="tokrows"></div>
+    </section>
+
+    <section class="mod">
+      <h3><span class="step">03</span> Encode</h3>
+      <div class="ctl">
+        <label>Output resolution (long edge) <output id="oRes">—</output></label>
+        <input type="range" id="sRes" min="640" max="2000" step="16" value="1400" disabled>
+        <div class="note">Resolution sets the token cost. Quality sets the byte cost.</div>
+      </div>
+      <div class="ctl">
+        <label>JPEG quality <output id="oQ">78</output></label>
+        <input type="range" id="sQ" min="30" max="95" step="1" value="78" disabled>
+      </div>
+      <div class="ctl">
+        <label>Contone smoothing <output id="oBg">2×</output></label>
+        <input type="range" id="sBg" min="1" max="6" step="1" value="2" disabled>
+        <div class="note">Low-passes the contone layer only. Text pixels are never smoothed.</div>
+      </div>
+    </section>
+
+    <section class="mod">
+      <h3><span class="step">04</span> Verify</h3>
+      <button class="btn ghost" id="btnVerify" disabled>Run legibility check</button>
+      <button class="btn" id="btnAuto" disabled>Find smallest passing settings</button>
+      <div class="ctl" style="margin-top:12px">
+        <label>Max character error rate <output id="oEps">3.0%</output></label>
+        <input type="range" id="sEps" min="0" max="10" step="0.5" value="3">
+      </div>
+      <div class="proof" id="proof" hidden>
+        <div class="strip" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="rows" id="proofRows"></div>
+      </div>
+      <div class="pgbar" id="pgbar"><i id="pgfill"></i></div>
+      <div class="console" id="log"></div>
+    </section>
+
+    <section class="mod">
+      <h3><span class="step">05</span> Export</h3>
+      <label class="check">
+        <input type="checkbox" id="ckText" checked>
+        <span>Embed invisible text layer
+          <small>An AI pipeline that extracts PDF text reads this page for a fraction of the image-token cost.</small>
+        </span>
+      </label>
+      <button class="btn ghost" id="btnPrepAll" disabled>Prepare all pages</button>
+      <button class="btn" id="btnExport" disabled>Export PDF</button>
+    </section>
+
+    <footer>
+      Segmentation after Tompkins &amp; Kossentini (JBIG2). Layering after ITU-T T.44 (MRC).
+      Verification metric: OCR character error rate on the text layer, SSIM on the contone layer —
+      because perceptual metrics can't see a hallucinated glyph.
+      To host: put this file in a GitHub Pages repo as <b>index.html</b>.
+    </footer>
+  </aside>
+</div>
+
+<script>
+"use strict";
+/* =====================================================================
+   SEPARATION PRESS v1
+   Pipeline: ingest → Tompkins segmentation → flattened-MRC encode →
+   OCR-CER / SSIM verification → PDF (+ invisible text layer).
+   Zero build step. Dependencies (Tesseract.js, pdf-lib) lazy-load from CDN.
+   ===================================================================== */
+
+/* ---------------- constants ---------------- */
+const WORK_MAX   = 2000;   // working-canvas long edge (analysis resolution)
+const BLOCK      = 8;      // smear-reduction block (Tompkins used 8×8 @200dpi)
+const SSIM_GATE  = 0.88;   // contone quality gate
+const TXT_MIN    = 20;     // min reference chars to treat page as "has text"
+const SAUVOLA_K  = 0.2, SAUVOLA_R = 128, SAUVOLA_W = 31;
+
+const CDN = {
+  tesseract: "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js",
+  pdflib:    "https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"
+};
+
+/* ---------------- app state ---------------- */
+const pages = [];        // Page objects
+let cur = -1;            // current page index
+let view = "orig";       // orig | layers | out
+let busy = false;
+let ocrWorker = null;
+
+/* ---------------- tiny DOM helpers ---------------- */
+const $ = id => document.getElementById(id);
+const el = (t, cls) => { const e = document.createElement(t); if (cls) e.className = cls; return e; };
+function log(msg, cls){ const L=$("log"); const d=document.createElement("div"); if(cls)d.className=cls; d.textContent=msg; L.appendChild(d); L.scrollTop=L.scrollHeight; }
+function clearLog(){ $("log").textContent=""; }
+function setProgress(p){ const b=$("pgbar"); if(p==null){b.classList.remove("on");return;} b.classList.add("on"); $("pgfill").style.width=(p*100).toFixed(0)+"%"; }
+function setBusy(b){ busy=b; refreshButtons(); }
+
+/* ---------------- lazy dependency loading ---------------- */
+function loadScript(src){
+  return new Promise((res,rej)=>{
+    const s=document.createElement("script"); s.src=src; s.onload=res;
+    s.onerror=()=>rej(new Error("Failed to load "+src)); document.head.appendChild(s);
+  });
+}
+async function ensureOCR(){
+  if (ocrWorker) return ocrWorker;
+  $("dotOcr").className="dot busy"; $("ocrState").textContent="loading";
+  await loadScript(CDN.tesseract);
+  ocrWorker = await Tesseract.createWorker("eng", 1, {
+    logger: m => { if (m.status==="recognizing text") setProgress(m.progress); }
+  });
+  $("dotOcr").className="dot ready"; $("ocrState").textContent="ready";
+  return ocrWorker;
+}
+async function ensurePDF(){
+  if (window.PDFLib) return;
+  $("dotPdf").className="dot busy"; $("pdfState").textContent="loading";
+  await loadScript(CDN.pdflib);
+  $("dotPdf").className="dot ready"; $("pdfState").textContent="ready";
+}
+
+/* =====================================================================
+   1. INGEST
+   ===================================================================== */
+async function fileToBitmap(file){
+  try { return await createImageBitmap(file, { imageOrientation: "from-image" }); }
+  catch(e){
+    // Fallback path for older browsers
+    const url = URL.createObjectURL(file);
+    const img = await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
+    URL.revokeObjectURL(url);
+    return img;
+  }
+}
+function makeCanvas(w,h){ const c=document.createElement("canvas"); c.width=w; c.height=h; return c; }
+
+async function addFiles(files){
+  const list=[...files].filter(f=>f.type.startsWith("image/"));
+  if(!list.length) return;
+  setBusy(true);
+  for (const f of list){
+    try{
+      const bm = await fileToBitmap(f);
+      const s  = Math.min(1, WORK_MAX / Math.max(bm.width, bm.height));
+      const w  = Math.max(1,Math.round(bm.width*s)), h = Math.max(1,Math.round(bm.height*s));
+      const work = makeCanvas(w,h);
+      const wc = work.getContext("2d",{willReadFrequently:true});
+      wc.imageSmoothingQuality="high";
+      wc.drawImage(bm,0,0,w,h);
+      if (bm.close) bm.close();
+      const page = {
+        name: f.name, work, w, h,
+        seg:null, verdict:null,
+        settings:{ longEdge: Math.min(1400, Math.max(w,h)), q: 78, bgF: 2 },
+        refText:null,                 // best-case OCR text (cached)
+        out:null,                     // {blob, w, h, canvas}
+        metrics:null,                 // {cer, ssim, words, pass}
+        stale:true
+      };
+      analyze(page);
+      pages.push(page);
+    }catch(err){ console.error(err); log("Could not read "+f.name,"bad"); }
+  }
+  setBusy(false);
+  selectPage(pages.length-1);
+  renderTray();
+}
+
+/* =====================================================================
+   2. ANALYZE — Tompkins-style segmentation
+      gray → Sauvola binarize → 8×8 smear → connected components →
+      classify by weight/area (biased toward non-text) → tone promotion →
+      reverse-text rescue → dilate text → region grid + verdict
+   ===================================================================== */
+function analyze(page){
+  const {work,w,h} = page;
+  const ctx = work.getContext("2d",{willReadFrequently:true});
+  const data = ctx.getImageData(0,0,w,h).data;
+
+  /* gray */
+  const gray = new Uint8Array(w*h);
+  for(let i=0,p=0;i<gray.length;i++,p+=4)
+    gray[i]=(data[p]*77 + data[p+1]*151 + data[p+2]*28)>>8;
+
+  /* integral images for Sauvola (sum, sumSq) */
+  const iw=w+1;
+  const S  = new Float64Array((w+1)*(h+1));
+  const S2 = new Float64Array((w+1)*(h+1));
+  for(let y=1;y<=h;y++){
+    let rs=0, rs2=0;
+    const gy=(y-1)*w, sy=y*iw, sy0=(y-1)*iw;
+    for(let x=1;x<=w;x++){
+      const g=gray[gy+x-1]; rs+=g; rs2+=g*g;
+      S[sy+x]=S[sy0+x]+rs; S2[sy+x]=S2[sy0+x]+rs2;
+    }
+  }
+  const half=SAUVOLA_W>>1;
+  const bin = new Uint8Array(w*h);      // 1 = ink
+  for(let y=0;y<h;y++){
+    const y0=Math.max(0,y-half), y1=Math.min(h-1,y+half);
+    for(let x=0;x<w;x++){
+      const x0=Math.max(0,x-half), x1=Math.min(w-1,x+half);
+      const A=(y1+1)*iw, B=y0*iw;
+      const n=(x1-x0+1)*(y1-y0+1);
+      const sum = S[A+x1+1]-S[A+x0]-S[B+x1+1]+S[B+x0];
+      const sq  = S2[A+x1+1]-S2[A+x0]-S2[B+x1+1]+S2[B+x0];
+      const m = sum/n;
+      const v = Math.max(0, sq/n - m*m);
+      const T = m*(1 + SAUVOLA_K*(Math.sqrt(v)/SAUVOLA_R - 1));
+      if (gray[y*w+x] < T) bin[y*w+x]=1;
+    }
+  }
+
+  /* per-block stats + smear reduction (block black iff any ink) */
+  const rw=Math.ceil(w/BLOCK), rh=Math.ceil(h/BLOCK), rn=rw*rh;
+  const rbin=new Uint8Array(rn);
+  const bMean=new Float32Array(rn), bStd=new Float32Array(rn);
+  for(let by=0;by<rh;by++){
+    for(let bx=0;bx<rw;bx++){
+      const x0=bx*BLOCK, y0=by*BLOCK;
+      const x1=Math.min(w,x0+BLOCK), y1=Math.min(h,y0+BLOCK);
+      let ink=0,s=0,s2=0,n=0;
+      for(let y=y0;y<y1;y++){ const r=y*w;
+        for(let x=x0;x<x1;x++){ const g=gray[r+x]; s+=g; s2+=g*g; n++; if(bin[r+x])ink=1; } }
+      const i=by*rw+bx;
+      rbin[i]=ink;
+      const m=s/n; bMean[i]=m; bStd[i]=Math.sqrt(Math.max(0,s2/n-m*m));
+    }
+  }
+
+  /* paper tone = median mean of ink-free blocks */
+  const paperSamples=[];
+  for(let i=0;i<rn;i++) if(!rbin[i]) paperSamples.push(bMean[i]);
+  paperSamples.sort((a,b)=>a-b);
+  const paper = paperSamples.length ? paperSamples[paperSamples.length>>1] : 235;
+
+  /* connected components on reduced grid (8-connected, iterative) */
+  const label=new Int32Array(rn).fill(-1);
+  const comps=[]; const stack=[];
+  let totalInk=0; for(let i=0;i<rn;i++) totalInk+=rbin[i];
+  for(let i=0;i<rn;i++){
+    if(!rbin[i]||label[i]>=0) continue;
+    const id=comps.length;
+    const c={id,count:0,x0:rw,y0:rh,x1:0,y1:0,meanG:0,stdG:0};
+    stack.length=0; stack.push(i); label[i]=id;
+    while(stack.length){
+      const p=stack.pop(); c.count++;
+      const px=p%rw, py=(p/rw)|0;
+      c.meanG+=bMean[p]; c.stdG+=bStd[p];
+      if(px<c.x0)c.x0=px; if(px>c.x1)c.x1=px;
+      if(py<c.y0)c.y0=py; if(py>c.y1)c.y1=py;
+      for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+        if(!dx&&!dy)continue;
+        const nx=px+dx, ny=py+dy;
+        if(nx<0||ny<0||nx>=rw||ny>=rh)continue;
+        const q=ny*rw+nx;
+        if(rbin[q]&&label[q]<0){ label[q]=id; stack.push(q); }
+      }
+    }
+    c.meanG/=c.count; c.stdG/=c.count;
+    comps.push(c);
+  }
+
+  /* classify components — Tompkins thresholds, biased toward NON-TEXT */
+  const NONTEXT=new Uint8Array(comps.length);
+  for(const c of comps){
+    const areaFrac=((c.x1-c.x0+1)*(c.y1-c.y0+1))/rn;
+    const weightFrac=totalInk?c.count/totalInk:0;
+    const density=c.count/Math.max(1,(c.x1-c.x0+1)*(c.y1-c.y0+1));
+    if (weightFrac>0.15 || areaFrac>0.15) NONTEXT[c.id]=1;
+    else if (c.count>120 && density>0.85) NONTEXT[c.id]=1;   // large solid slab
+  }
+
+  /* reverse-text rescue (Tompkins §3): only for solid dark slabs, where
+     inversion is meaningful. Invert full-res bin inside bbox, smear, count
+     small components. Many small symbols ⇒ reverse-colored text. */
+  for(const c of comps){
+    if(!NONTEXT[c.id]) continue;
+    if(!(c.meanG<95 && c.stdG<45)) continue;         // must look like a solid banner
+    const X0=c.x0*BLOCK, Y0=c.y0*BLOCK;
+    const X1=Math.min(w,(c.x1+1)*BLOCK), Y1=Math.min(h,(c.y1+1)*BLOCK);
+    const bw=X1-X0, bh=Y1-Y0;
+    const lrw=Math.ceil(bw/BLOCK), lrh=Math.ceil(bh/BLOCK);
+    const lred=new Uint8Array(lrw*lrh);
+    for(let by=0;by<lrh;by++)for(let bx=0;bx<lrw;bx++){
+      const x0=X0+bx*BLOCK,y0=Y0+by*BLOCK;
+      const x1=Math.min(X1,x0+BLOCK),y1=Math.min(Y1,y0+BLOCK);
+      let any=0;
+      for(let y=y0;y<y1&&!any;y++){const r=y*w;
+        for(let x=x0;x<x1;x++) if(!bin[r+x]){any=1;break;} }   // inverted ink
+      lred[by*lrw+bx]=any;
+    }
+    // local CC count of small symbols
+    const ll=new Int32Array(lrw*lrh).fill(-1); let nSmall=0, lid=0;
+    const st=[];
+    for(let i=0;i<lred.length;i++){
+      if(!lred[i]||ll[i]>=0)continue;
+      let cnt=0; st.length=0; st.push(i); ll[i]=lid;
+      while(st.length){
+        const p=st.pop(); cnt++;
+        const px=p%lrw, py=(p/lrw)|0;
+        for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+          if(!dx&&!dy)continue;
+          const nx=px+dx,ny=py+dy;
+          if(nx<0||ny<0||nx>=lrw||ny>=lrh)continue;
+          const q=ny*lrw+nx;
+          if(lred[q]&&ll[q]<0){ll[q]=lid;st.push(q);}
+        }
+      }
+      if(cnt>=1&&cnt<=60) nSmall++;
+      lid++;
+    }
+    if(nSmall>=25) NONTEXT[c.id]=0;   // it's reverse text — keep it sharp
+  }
+
+  /* region grid: 0 blank / 1 text / 2 contone */
+  const region=new Uint8Array(rn);
+  for(let i=0;i<rn;i++){
+    if(rbin[i]) region[i] = NONTEXT[label[i]] ? 2 : 1;
+  }
+  /* tone promotion: mid-tone or high-variance ink-free blocks are contone
+     (photos that partially escape binarization) */
+  for(let i=0;i<rn;i++){
+    if(region[i]===1) continue;
+    if(bMean[i] < paper-38 || bStd[i] > 24) region[i]=2;
+  }
+  /* dilate text by 1 cell to protect glyph edges (text wins) */
+  const dil=new Uint8Array(region);
+  for(let y=0;y<rh;y++)for(let x=0;x<rw;x++){
+    if(region[y*rw+x]!==1)continue;
+    for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+      const nx=x+dx,ny=y+dy;
+      if(nx<0||ny<0||nx>=rw||ny>=rh)continue;
+      dil[ny*rw+nx]=1;
+    }
+  }
+
+  /* paper color (RGB) sampled from blank blocks */
+  let pr=0,pg=0,pb=0,pn=0;
+  for(let by=0;by<rh;by++)for(let bx=0;bx<rw;bx++){
+    if(dil[by*rw+bx]!==0)continue;
+    const x=Math.min(w-1,bx*BLOCK+(BLOCK>>1)), y=Math.min(h-1,by*BLOCK+(BLOCK>>1));
+    const p=(y*w+x)*4; pr+=data[p];pg+=data[p+1];pb+=data[p+2];pn++;
+  }
+  const paperRGB = pn ? [Math.round(pr/pn),Math.round(pg/pn),Math.round(pb/pn)] : [245,243,238];
+
+  /* verdict */
+  let tc=0,cc=0;
+  for(let i=0;i<rn;i++){ if(dil[i]===1)tc++; else if(dil[i]===2)cc++; }
+  const tFrac=tc/rn, cFrac=cc/rn;
+  let kind="mixed";
+  if (cFrac>0.35 || (tFrac<0.01 && cFrac>0.05)) kind="photo";
+  else if (cFrac<0.04 && tFrac>0.02) kind="text";
+  else if (tFrac+cFrac<0.01) kind="blank";
+
+  page.seg={rw,rh,region:dil,paperRGB};
+  page.verdict={kind,tFrac,cFrac,bFrac:1-tFrac-cFrac};
+  page.stale=true; page.out=null; page.metrics=null; page.refText=null;
+}
+
+/* =====================================================================
+   3. ENCODE — flattened MRC composition
+      contone+blank → low-passed background; text cells copied sharp.
+   ===================================================================== */
+function cellRuns(page, kind){
+  // merged horizontal runs of cells matching `kind` (array of {y,x0,x1})
+  const {rw,rh,region}=page.seg; const runs=[];
+  for(let y=0;y<rh;y++){
+    let x=0;
+    while(x<rw){
+      if(region[y*rw+x]===kind){
+        let x0=x; while(x<rw&&region[y*rw+x]===kind)x++;
+        runs.push({y,x0,x1:x});
+      } else x++;
+    }
+  }
+  return runs;
+}
+
+function compose(page, longEdge, bgF){
+  const {work,w,h}=page;
+  const s=Math.min(1, longEdge/Math.max(w,h));
+  const ow=Math.max(1,Math.round(w*s)), oh=Math.max(1,Math.round(h*s));
+  const [pr,pg,pb]=page.seg.paperRGB;
+  const paperCSS=`rgb(${pr},${pg},${pb})`;
+
+  /* background source: working image with blank cells flattened to paper */
+  const bgSrc=makeCanvas(w,h);
+  const bctx=bgSrc.getContext("2d");
+  bctx.drawImage(work,0,0);
+  bctx.fillStyle=paperCSS;
+  for(const r of cellRuns(page,0))
+    bctx.fillRect(r.x0*BLOCK, r.y*BLOCK, (r.x1-r.x0)*BLOCK, BLOCK);
+
+  /* low-pass background via down/up-sample */
+  const out=makeCanvas(ow,oh);
+  const octx=out.getContext("2d");
+  octx.imageSmoothingEnabled=true; octx.imageSmoothingQuality="high";
+  if(bgF<=1){
+    octx.drawImage(bgSrc,0,0,ow,oh);
+  }else{
+    const sw=Math.max(1,Math.round(ow/bgF)), sh=Math.max(1,Math.round(oh/bgF));
+    const small=makeCanvas(sw,sh);
+    const sctx=small.getContext("2d");
+    sctx.imageSmoothingEnabled=true; sctx.imageSmoothingQuality="high";
+    sctx.drawImage(bgSrc,0,0,sw,sh);
+    octx.drawImage(small,0,0,ow,oh);
+  }
+  /* hard-flatten blank cells at output res (crisp margins, cheap bytes) */
+  octx.fillStyle=paperCSS;
+  for(const r of cellRuns(page,0))
+    octx.fillRect(r.x0*BLOCK*s, r.y*BLOCK*s, (r.x1-r.x0)*BLOCK*s, BLOCK*s);
+
+  /* sharp text layer on top */
+  for(const r of cellRuns(page,1)){
+    const sx=r.x0*BLOCK, sy=r.y*BLOCK;
+    const sw=Math.min(w,r.x1*BLOCK)-sx, sh=Math.min(h,(r.y+1)*BLOCK)-sy;
+    octx.drawImage(work, sx,sy,sw,sh, sx*s,sy*s,sw*s,sh*s);
+  }
+  return out;
+}
+
+function canvasToJpeg(canvas,q){
+  return new Promise(res=>canvas.toBlob(b=>res(b),"image/jpeg",q/100));
+}
+
+async function encode(page){
+  const {longEdge,q,bgF}=page.settings;
+  const canvas=compose(page,longEdge,bgF);
+  const blob=await canvasToJpeg(canvas,q);
+  page.out={blob,w:canvas.width,h:canvas.height,canvas};
+  page.stale=false;
+  return page.out;
+}
+
+/* =====================================================================
+   4. TOKEN ESTIMATORS (patch-grid arithmetic, computed on output dims)
+   ===================================================================== */
+function tokQwen(w,h){
+  // Qwen2/2.5-VL: 14px patches, 2×2 merge ⇒ 28px cells; ≤16384 patches (12.85MP)
+  const MAXP=12845056;
+  let W=w,H=h;
+  if(W*H>MAXP){ const k=Math.sqrt(MAXP/(W*H)); W=Math.floor(W*k); H=Math.floor(H*k); }
+  return Math.ceil(W/28)*Math.ceil(H/28);
+}
+function tokGPT(w,h){
+  // GPT-4o "high": fit 2048², shortest side → 768, 512px tiles: 85 + 170/tile
+  let W=w,H=h;
+  const f1=Math.min(1,2048/Math.max(W,H)); W*=f1;H*=f1;
+  const f2=Math.min(1,768/Math.min(W,H)); W*=f2;H*=f2;
+  return 85 + 170*Math.ceil(W/512)*Math.ceil(H/512);
+}
+function tokClaude(w,h){
+  // Claude: long edge ≤1568; tokens ≈ w·h/750, capped ~1600
+  let W=w,H=h;
+  const f=Math.min(1,1568/Math.max(W,H)); W*=f;H*=f;
+  return Math.min(1600, Math.ceil(W*H/750));
+}
+
+/* =====================================================================
+   5. METRICS — text-only canvases, OCR, CER, SSIM
+   ===================================================================== */
+function textOnlyCanvas(page, srcCanvas, scale){
+  // paper-colored canvas with only text cells drawn from srcCanvas
+  const [pr,pg,pb]=page.seg.paperRGB;
+  const c=makeCanvas(srcCanvas.width,srcCanvas.height);
+  const ctx=c.getContext("2d");
+  ctx.fillStyle=`rgb(${pr},${pg},${pb})`;
+  ctx.fillRect(0,0,c.width,c.height);
+  for(const r of cellRuns(page,1)){
+    const x=r.x0*BLOCK*scale, y=r.y*BLOCK*scale;
+    const w=(r.x1-r.x0)*BLOCK*scale, h=BLOCK*scale;
+    ctx.drawImage(srcCanvas, x,y,w,h, x,y,w,h);
+  }
+  return c;
+}
+function normText(s){ return (s||"").replace(/\s+/g," ").trim().slice(0,6000); }
+function cerOf(ref,test){
+  ref=normText(ref); test=normText(test);
+  if(!ref.length) return null;
+  const n=ref.length,m=test.length;
+  let prev=new Int32Array(m+1), curr=new Int32Array(m+1);
+  for(let j=0;j<=m;j++) prev[j]=j;
+  for(let i=1;i<=n;i++){
+    curr[0]=i;
+    const rc=ref.charCodeAt(i-1);
+    for(let j=1;j<=m;j++){
+      const cost=rc===test.charCodeAt(j-1)?0:1;
+      curr[j]=Math.min(prev[j]+1, curr[j-1]+1, prev[j-1]+cost);
+    }
+    [prev,curr]=[curr,prev];
+  }
+  return prev[m]/n;
+}
+function grayOf(canvas){
+  const ctx=canvas.getContext("2d",{willReadFrequently:true});
+  const d=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+  const g=new Uint8Array(canvas.width*canvas.height);
+  for(let i=0,p=0;i<g.length;i++,p+=4) g[i]=(d[p]*77+d[p+1]*151+d[p+2]*28)>>8;
+  return g;
+}
+function ssimContone(page, refCanvas, cmpCanvas){
+  // mean SSIM over contone cells (structural gate for the smoothed layer)
+  const runsC=cellRuns(page,2);
+  if(!runsC.length) return null;
+  const W=refCanvas.width,H=refCanvas.height;
+  const s=W/page.w;
+  const gr=grayOf(refCanvas), gc=grayOf(cmpCanvas);
+  const C1=(0.01*255)**2, C2=(0.03*255)**2;
+  let sum=0,n=0;
+  for(const r of runsC){
+    for(let cx=r.x0;cx<r.x1;cx++){
+      const x0=Math.floor(cx*BLOCK*s), y0=Math.floor(r.y*BLOCK*s);
+      const x1=Math.min(W,Math.ceil((cx+1)*BLOCK*s)), y1=Math.min(H,Math.ceil((r.y+1)*BLOCK*s));
+      if(x1-x0<3||y1-y0<3) continue;
+      let sa=0,sb=0,saa=0,sbb=0,sab=0,cnt=0;
+      for(let y=y0;y<y1;y++){const row=y*W;
+        for(let x=x0;x<x1;x++){
+          const a=gr[row+x],b=gc[row+x];
+          sa+=a;sb+=b;saa+=a*a;sbb+=b*b;sab+=a*b;cnt++;
+        }}
+      const ma=sa/cnt,mb=sb/cnt;
+      const va=saa/cnt-ma*ma, vb=sbb/cnt-mb*mb, cov=sab/cnt-ma*mb;
+      sum+=((2*ma*mb+C1)*(2*cov+C2))/((ma*ma+mb*mb+C1)*(va+vb+C2));
+      n++;
+    }
+  }
+  return n?sum/n:null;
+}
+
+async function ocrCanvas(canvas){
+  const w=await ensureOCR();
+  setProgress(0);
+  const {data}=await w.recognize(canvas);
+  setProgress(null);
+  return {text:data.text||"", words:(data.words||[]).filter(x=>x.text&&x.text.trim())};
+}
+
+async function ensureRefText(page){
+  if(page.refText!==null) return page.refText;
+  const hasText=cellRuns(page,1).length>0;
+  if(!hasText){ page.refText=""; return ""; }
+  log("Reading reference text (best case)…");
+  const ref=textOnlyCanvas(page,page.work,1);
+  const {text}=await ocrCanvas(ref);
+  page.refText=normText(text);
+  log(`Reference: ${page.refText.length} chars`);
+  return page.refText;
+}
+
+async function verify(page,{silent=false}={}){
+  if(!page.out||page.stale) await encode(page);
+  const ref=await ensureRefText(page);
+  const bmp=await createImageBitmap(page.out.blob);
+  const dec=makeCanvas(page.out.w,page.out.h);
+  dec.getContext("2d").drawImage(bmp,0,0); if(bmp.close)bmp.close();
+
+  const scale=page.out.w/page.w;
+  let cer=null, words=[];
+  if(ref.length>=TXT_MIN){
+    if(!silent) log("Re-reading compressed text layer…");
+    const t=textOnlyCanvas(page,dec,scale);
+    const r=await ocrCanvas(t);
+    cer=cerOf(ref,r.text);
+    words=r.words;
+  }
+  const refPlain=makeCanvas(page.out.w,page.out.h);
+  const rc=refPlain.getContext("2d");
+  rc.imageSmoothingQuality="high";
+  rc.drawImage(page.work,0,0,page.out.w,page.out.h);
+  const ssim=ssimContone(page,refPlain,dec);
+
+  const eps=parseFloat($("sEps").value)/100;
+  const textPass = cer==null || cer<=eps;
+  const tonePass = ssim==null || ssim>=SSIM_GATE;
+  page.metrics={cer,ssim,words,pass:textPass&&tonePass,hasText:ref.length>=TXT_MIN};
+  return page.metrics;
+}
+
+/* =====================================================================
+   6. AUTO-OPTIMIZE — smallest resolution that still reads,
+      then cheapest quality that still reads (per the two-loop design).
+   ===================================================================== */
+async function autoOptimize(page){
+  clearLog();
+  const eps=parseFloat($("sEps").value)/100;
+  const workLE=Math.max(page.w,page.h);
+  const ref=await ensureRefText(page);
+  const hasText=ref.length>=TXT_MIN;
+
+  if(!hasText){
+    log("No readable text detected — optimizing contone layer only (SSIM gate).");
+    page.settings.bgF=1;
+    page.settings.longEdge=Math.min(1280,workLE);
+    let lo=35,hi=90,best=90;
+    for(let i=0;i<4;i++){
+      const q=(lo+hi)>>1;
+      page.settings.q=q; page.stale=true;
+      const m=await verify(page,{silent:true});
+      log(`q=${q} → SSIM ${m.ssim!=null?m.ssim.toFixed(3):"—"} ${m.ssim>=SSIM_GATE?"pass":"fail"}`);
+      if(m.ssim==null||m.ssim>=SSIM_GATE){best=q;hi=q-1;}else lo=q+1;
+    }
+    page.settings.q=best; page.stale=true;
+    await verify(page,{silent:true});
+    log(`Settled: ${page.settings.longEdge}px @ q${best}`,"ok");
+    return;
+  }
+
+  /* Loop 1 — resolution, ascending, gate = CER */
+  const cands=[896,1120,1400,1680,workLE].filter(v=>v<=workLE);
+  if(!cands.length)cands.push(workLE);
+  let chosen=workLE, found=false;
+  page.settings.q=85; page.settings.bgF=Math.min(page.settings.bgF,3);
+  for(const le of cands){
+    page.settings.longEdge=le; page.stale=true;
+    const m=await verify(page,{silent:true});
+    log(`long edge ${le}px @ q85 → CER ${(m.cer*100).toFixed(1)}% ${m.cer<=eps?"pass":"fail"}`);
+    if(m.cer<=eps){chosen=le;found=true;break;}
+  }
+  if(!found){ chosen=workLE; log("No resolution passed at q85 — keeping full working size.","mid"); }
+  page.settings.longEdge=chosen;
+
+  /* Loop 2 — quality, binary search, gate = CER (+SSIM) */
+  let lo=35,hi=92,bestQ=92;
+  for(let i=0;i<4;i++){
+    const q=(lo+hi)>>1;
+    page.settings.q=q; page.stale=true;
+    const m=await verify(page,{silent:true});
+    const sTxt=m.ssim!=null?` ssim ${m.ssim.toFixed(3)}`:"";
+    const pass=m.cer<=eps&&(m.ssim==null||m.ssim>=SSIM_GATE);
+    log(`q=${q} → CER ${(m.cer*100).toFixed(1)}%${sTxt} ${pass?"pass":"fail"}`);
+    if(pass){bestQ=q;hi=q-1;}else lo=q+1;
+  }
+  page.settings.q=bestQ; page.stale=true;
+  let m=await verify(page,{silent:true});
+  /* if only the contone gate fails, ease smoothing once */
+  if(!m.pass && m.cer<=eps && m.ssim!=null && m.ssim<SSIM_GATE && page.settings.bgF>1){
+    page.settings.bgF-=1; page.stale=true;
+    log(`Contone below gate — easing smoothing to ${page.settings.bgF}×`);
+    m=await verify(page,{silent:true});
+  }
+  const kb=(page.out.blob.size/1024).toFixed(0);
+  log(`Settled: ${chosen}px @ q${bestQ}, smoothing ${page.settings.bgF}× → ${kb} KB, CER ${(m.cer*100).toFixed(1)}%`, m.pass?"ok":"mid");
+}
+
+/* =====================================================================
+   7. EXPORT — pdf-lib, one page per image, optional invisible text layer
+   ===================================================================== */
+function winAnsiSafe(s){ return s.replace(/[^\x20-\x7E\u00A0-\u00FF]/g,""); }
+
+async function exportPDF(){
+  await ensurePDF();
+  const {PDFDocument,StandardFonts}=PDFLib;
+  const doc=await PDFDocument.create();
+  doc.setProducer("Separation Press v1");
+  const font=await doc.embedFont(StandardFonts.Helvetica);
+  const wantText=$("ckText").checked;
+
+  for(const page of pages){
+    if(!page.out||page.stale) await encode(page);
+    if(wantText && !page.metrics) await verify(page,{silent:true});
+    const bytes=new Uint8Array(await page.out.blob.arrayBuffer());
+    const img=await doc.embedJpg(bytes);
+    const {w,h}={w:page.out.w,h:page.out.h};
+    const p=doc.addPage([w,h]);
+    p.drawImage(img,{x:0,y:0,width:w,height:h});
+    if(wantText && page.metrics && page.metrics.words){
+      for(const wd of page.metrics.words){
+        const b=wd.bbox; if(!b) continue;
+        const txt=winAnsiSafe(wd.text); if(!txt) continue;
+        const size=Math.max(4,(b.y1-b.y0)*0.92);
+        try{
+          p.drawText(txt,{x:b.x0,y:h-b.y1,size,font,opacity:0});
+        }catch(e){/* skip un-encodable word */}
+      }
+    }
+  }
+  const pdfBytes=await doc.save();
+  const blob=new Blob([pdfBytes],{type:"application/pdf"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download="ai-ready.pdf";
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+  log(`Exported ${pages.length} page(s), ${(blob.size/1024).toFixed(0)} KB total.`,"ok");
+}
+
+/* =====================================================================
+   8. UI
+   ===================================================================== */
+function renderTray(){
+  const tray=$("tray");
+  tray.querySelectorAll(".thumb").forEach(t=>t.remove());
+  pages.forEach((p,i)=>{
+    const b=el("button","thumb"+(i===cur?" current":""));
+    b.setAttribute("aria-label",p.name);
+    const im=document.createElement("img");
+    const th=makeCanvas(120,Math.round(120*p.h/p.w));
+    th.getContext("2d").drawImage(p.work,0,0,th.width,th.height);
+    im.src=th.toDataURL("image/jpeg",0.6);
+    b.appendChild(im);
+    const tag=el("span","tag"); tag.textContent=String(i+1).padStart(2,"0"); b.appendChild(tag);
+    if(p.metrics){
+      const st=el("span","stamp "+(p.metrics.pass?"pass":"fail"));
+      st.textContent=p.metrics.pass?"OK":"!";
+      b.appendChild(st);
+    }
+    b.onclick=()=>selectPage(i);
+    tray.insertBefore(b,$("addBtn"));
+  });
+}
+
+function selectPage(i){
+  cur=i;
+  const p=pages[cur];
+  $("empty").hidden=!!p;
+  $("view").hidden=!p;
+  if(!p){renderTray();return;}
+  const s=p.settings;
+  const le=Math.max(p.w,p.h);
+  const r=$("sRes"); r.min=Math.min(640,le); r.max=le; r.value=Math.min(s.longEdge,le);
+  $("sQ").value=s.q; $("sBg").value=s.bgF;
+  [$("sRes"),$("sQ"),$("sBg")].forEach(x=>x.disabled=false);
+  renderTray(); renderVerdict(); renderControls(); renderProof();
+  drawView(); refreshEstimates(); refreshButtons();
+}
+
+function renderVerdict(){
+  const v=$("verdict"), p=pages[cur];
+  $("mixbar").hidden=$("mixlbl").hidden=!p;
+  if(!p){v.className="verdict";v.innerHTML="<b>No page selected</b>Add a photo to run layer separation.";return;}
+  const {kind,tFrac,cFrac,bFrac}=p.verdict;
+  const pct=x=>(x*100).toFixed(0)+"%";
+  const bar=$("mixbar");
+  bar.children[0].style.width=pct(tFrac);
+  bar.children[1].style.width=pct(cFrac);
+  bar.children[2].style.width=pct(Math.max(0,bFrac));
+  let cls="verdict",head="",body="",hint="";
+  if(kind==="text"){
+    cls+=" td"; head="Text-dominant page";
+    body=`${pct(tFrac)} text layer, ${pct(cFrac)} contone.`;
+    hint="Mostly text: consider sending the extracted text instead of the image — see the “as extracted text” row below.";
+  }else if(kind==="photo"){
+    cls+=" pd"; head="Photo-dominant page";
+    body=`${pct(cFrac)} contone, little machine-readable text.`;
+    hint="Legibility gate switches to SSIM on the contone layer.";
+  }else if(kind==="blank"){
+    head="Nearly blank page"; body="Almost no ink detected."; hint="It will compress to almost nothing.";
+  }else{
+    head="Mixed page";
+    body=`${pct(tFrac)} text, ${pct(cFrac)} contone — the MRC sweet spot.`;
+    hint="Text cells stay sharp at full quality; contone is smoothed and crushed.";
+  }
+  v.className=cls;
+  v.innerHTML=`<b>${head}</b>${body}<div class="hint">${hint}</div>`;
+}
+
+function renderControls(){
+  const p=pages[cur]; if(!p)return;
+  $("oRes").textContent=$("sRes").value+" px";
+  $("oQ").textContent=$("sQ").value;
+  $("oBg").textContent=$("sBg").value+"×";
+  $("oEps").textContent=parseFloat($("sEps").value).toFixed(1)+"%";
+}
+
+let estTimer=null;
+function refreshEstimates(){
+  clearTimeout(estTimer);
+  estTimer=setTimeout(async()=>{
+    const p=pages[cur]; if(!p)return;
+    p.settings.longEdge=+$("sRes").value;
+    p.settings.q=+$("sQ").value;
+    p.settings.bgF=+$("sBg").value;
+    p.stale=true;
+    await encode(p);
+    const {w,h,blob}=p.out;
+    $("gTok").textContent=tokQwen(w,h).toLocaleString();
+    $("gKb").textContent=(blob.size/1024).toFixed(0)+" KB";
+    $("gDims").textContent=`${w}×${h}px`;
+    const rows=$("tokrows");
+    const txtTok=p.refText?Math.ceil(p.refText.length/4):null;
+    rows.innerHTML=
+      `<div><span>Qwen2.5-VL</span><span>${tokQwen(w,h).toLocaleString()} tok</span></div>`+
+      `<div><span>GPT-4o (high)</span><span>${tokGPT(w,h).toLocaleString()} tok</span></div>`+
+      `<div><span>Claude</span><span>${tokClaude(w,h).toLocaleString()} tok</span></div>`+
+      (txtTok!=null
+        ?`<div class="astext"><span>as extracted text</span><span>≈${txtTok.toLocaleString()} tok</span></div>`
+        :`<div><span>as extracted text</span><span>run check →</span></div>`);
+    if(view==="out") drawView();
+    renderProofStale();
+    renderTray();
+  },250);
+}
+
+function renderProofStale(){
+  const p=pages[cur];
+  if(p&&p.metrics&&p.stale===false) return;
+  // settings changed since last verify → mark stale
+}
+function renderProof(){
+  const p=pages[cur], box=$("proof"), rows=$("proofRows");
+  if(!p||!p.metrics){box.hidden=true;return;}
+  const m=p.metrics, eps=parseFloat($("sEps").value)/100;
+  box.hidden=false;
+  const cerRow=m.cer==null
+    ?`<div><span>text layer CER</span><span>no text</span></div>`
+    :`<div><span>text layer CER</span><span class="${m.cer<=eps?"ok":"bad"}">${(m.cer*100).toFixed(1)}%</span></div>`;
+  const ssimRow=m.ssim==null
+    ?`<div><span>contone SSIM</span><span>no contone</span></div>`
+    :`<div><span>contone SSIM</span><span class="${m.ssim>=SSIM_GATE?"ok":"mid"}">${m.ssim.toFixed(3)}</span></div>`;
+  rows.innerHTML=cerRow+ssimRow+
+    `<div><span>verdict</span><span class="${m.pass?"ok":"bad"}">${m.pass?"AI-READABLE":"DEGRADED"}</span></div>`;
+}
+
+function drawView(){
+  const p=pages[cur]; if(!p)return;
+  const c=$("view"), ctx=c.getContext("2d");
+  let src=p.work;
+  if(view==="out"&&p.out) src=p.out.canvas;
+  c.width=src.width; c.height=src.height;
+  ctx.drawImage(src,0,0);
+  if(view==="layers"){
+    const {rw,rh}=p.seg;
+    ctx.save();
+    for(const r of cellRuns(p,1)){
+      ctx.fillStyle="rgba(0,147,184,.22)";
+      ctx.fillRect(r.x0*BLOCK,r.y*BLOCK,(r.x1-r.x0)*BLOCK,BLOCK);
+    }
+    for(const r of cellRuns(p,2)){
+      ctx.fillStyle="rgba(205,47,123,.20)";
+      ctx.fillRect(r.x0*BLOCK,r.y*BLOCK,(r.x1-r.x0)*BLOCK,BLOCK);
+    }
+    ctx.restore();
+  }
+}
+
+function refreshButtons(){
+  const has=cur>=0&&pages[cur];
+  $("btnVerify").disabled=busy||!has;
+  $("btnAuto").disabled=busy||!has;
+  $("btnExport").disabled=busy||!pages.length;
+  $("btnPrepAll").disabled=busy||!pages.length;
+}
+
+/* ---------------- wiring ---------------- */
+$("addBtn").onclick=()=>$("fileInput").click();
+$("emptyAdd").onclick=()=>$("fileInput").click();
+$("fileInput").onchange=e=>{addFiles(e.target.files);e.target.value="";};
+
+const stage=$("stage");
+["dragover","dragenter"].forEach(ev=>stage.addEventListener(ev,e=>{e.preventDefault();$("empty").classList.add("drag");}));
+["dragleave","drop"].forEach(ev=>stage.addEventListener(ev,e=>{e.preventDefault();$("empty").classList.remove("drag");}));
+stage.addEventListener("drop",e=>addFiles(e.dataTransfer.files));
+
+document.querySelectorAll(".chip").forEach(ch=>{
+  ch.onclick=()=>{
+    document.querySelectorAll(".chip").forEach(c=>c.setAttribute("aria-pressed","false"));
+    ch.setAttribute("aria-pressed","true");
+    view=ch.dataset.view;
+    drawView();
+  };
+});
+
+[$("sRes"),$("sQ"),$("sBg")].forEach(s=>s.addEventListener("input",()=>{renderControls();refreshEstimates();}));
+$("sEps").addEventListener("input",()=>{renderControls();renderProof();});
+
+$("btnVerify").onclick=async()=>{
+  const p=pages[cur]; if(!p||busy)return;
+  setBusy(true); clearLog();
+  try{
+    const m=await verify(p);
+    if(m.cer!=null) log(`CER ${(m.cer*100).toFixed(1)}% · ${m.words.length} words recovered`, m.pass?"ok":"bad");
+    if(m.ssim!=null) log(`Contone SSIM ${m.ssim.toFixed(3)}`);
+    renderProof(); renderTray(); refreshEstimates();
+  }catch(e){ console.error(e); log("Check failed: "+e.message,"bad"); }
+  setBusy(false); setProgress(null);
+};
+
+$("btnAuto").onclick=async()=>{
+  const p=pages[cur]; if(!p||busy)return;
+  setBusy(true);
+  try{
+    await autoOptimize(p);
+    selectPage(cur);           // sync sliders to settled settings
+  }catch(e){ console.error(e); log("Auto-optimize failed: "+e.message,"bad"); }
+  setBusy(false); setProgress(null);
+};
+
+$("btnPrepAll").onclick=async()=>{
+  if(busy)return; setBusy(true); clearLog();
+  try{
+    for(let i=0;i<pages.length;i++){
+      log(`Page ${i+1}/${pages.length}: ${pages[i].name}`);
+      await verify(pages[i],{silent:true});
+      renderTray();
+    }
+    log("All pages prepared.","ok");
+  }catch(e){ console.error(e); log("Failed: "+e.message,"bad"); }
+  setBusy(false); setProgress(null);
+};
+
+$("btnExport").onclick=async()=>{
+  if(busy)return; setBusy(true);
+  try{ await exportPDF(); }
+  catch(e){ console.error(e); log("Export failed: "+e.message,"bad"); }
+  setBusy(false); setProgress(null);
+};
+
+refreshButtons();
+</script>
+</body>
+</html>
